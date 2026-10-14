@@ -1,0 +1,24 @@
+FocusMate upgrade starter
+Included
+Animated study buddy, dashboard stats, focus timer with optional sound/notifications, notebooks with touch drawing, flashcards and self-check quizzes, tasks, suggested timetable, stars/badges/themes, JSON backup, PWA install/offline shell.
+Deploy to GitHub Pages
+Create a public GitHub repository.
+Upload every file in this folder to the repository root (not inside another nested folder).
+Open Settings → Pages → Deploy from a branch → main → / (root) → Save.
+Wait for the HTTPS website URL. Open it in Android Chrome → ⋮ → Install app or Add to Home screen.
+Important cloud note
+The starter includes Firebase configuration placeholders but the account/cloud sync and live study-room chat are not activated yet in this lightweight build. To implement those fully, create a Firebase project, enable Email/Password Authentication and Firestore, then configure firebase-config.js. Paste and review firestore.rules. Do not put private service-account keys in frontend files. Before public launch, security-review the rules and add privacy policy, reporting/moderation, rate limits and abuse protections. Cloud services may require billing setup.
+Local vs cloud data
+Local features save in this browser on this device. Clearing browser data can erase it, so export backups regularly. Local storage does not sync between devices.
+Android testing
+Test over HTTPS, not by opening index.html as a file.
+Install the PWA from Chrome.
+Try each tab, create and reload a task/note/card, draw with your finger, finish a short timer, export/import a backup, unlock themes, and test portrait/landscape.
+Grant notifications only if wanted. Android can delay notifications and suspend background timers; do not rely on this as a guaranteed alarm clock.
+Offline mode caches the app shell, but Google Fonts and any future cloud services need connectivity.
+Files
+index.html page structure · styles.css layout · app.js app logic · manifest.json install details · sw.js offline shell · firebase-config.js cloud config placeholder · firestore.rules prototype rules.
+Music and alarm additions
+The Focus timer has gentle chime/bell-style alarm options and can use an audio file selected from your device for the current session. Select the file again after reopening FocusMate. Browser permissions and Android power settings can affect playback.
+Break Music provides direct links to Spotify, YouTube and Boomplay. It can embed eligible YouTube video links and Spotify track/album/playlist links where those services allow it. Boomplay is opened externally in this starter. Some music needs sign-in/premium and may not play in embedded mode.
+The music feature does not download, copy, or bypass restrictions on copyrighted music. Keep the app open during breaks; Android may pause background audio.
