@@ -1,136 +1,716 @@
-(()=>{'use strict';
+(() => {
+  'use strict';
+
+  // =====================================================
+  // FOCUSMATE — FIREBASE AUTHENTICATION + STUDY FEATURES
+  // Uses Firebase compat SDK and Firestore
+  // =====================================================
+
+  const $ = id => document.getElementById(id);
+
+  const KEY = 'focusmate_starter_v1';
+
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  const makeId = () =>
+    Math.random().toString(36).slice(2, 11);
+
   let firebaseReady = false;
   let auth = null;
   let db = null;
+  let currentUser = null;
+  let cloudSaveTimer = null;
+  let loadingCloud = false;
+
+  // ---------------- FIREBASE INITIALIZATION ----------------
 
   try {
-    if (typeof firebase !== "undefined" &&
-        firebase.apps.length === 0) {
-      firebase.initializeApp(firebaseConfig);
-    }
+    if (typeof firebase !== 'undefined') {
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
 
-    if (typeof firebase !== "undefined" &&
-        firebase.apps.length > 0) {
-      firebaseReady = true;
       auth = firebase.auth();
       db = firebase.firestore();
+      firebaseReady = true;
     }
   } catch (error) {
-    console.error("Firebase setup error:", error);
-  }
-const $=id=>document.getElementById(id),KEY='focusmate_starter_v1',today=()=>new Date().toISOString().slice(0,10),id=()=>Math.random().toString(36).slice(2,9);const fresh=()=>({stars:0,focus:0,tasks:[],notes:[{id:'first',title:'My first notebook',subject:'Mathematics',topic:'Getting started',text:'Welcome to FocusMate! Write your ideas here.',drawing:''}],active:'first',cards:[],sessions:[],badges:[],unlocked:['lavender'],theme:'lavender',plan:[]});let d;try{d={...fresh(),...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch{d=fresh()}let alarmObjectUrl=null;let noteId=d.active||d.notes[0]?.id,seconds=1500,total=1500,interval=null,running=false,eraser=false,last=null,drawing=false,installPrompt=null;const themes=[['lavender','Lavender cloud',0,'linear-gradient(90deg,#f7f3ff,#8b6ce8)'],['mint','Mint garden',20,'linear-gradient(90deg,#effaf5,#3d9d85)'],['peach','Peach daydream',35,'linear-gradient(90deg,#fff4ee,#dc8b75)'],['night','Midnight study',50,'linear-gradient(90deg,#201d32,#a58af7)']];const badges=[['first','🌱','First little step','Finish a focus session',()=>d.sessions.length>=1],['three','🌟','Findin// ---------- FIREBASE ACCOUNT & CLOUD BACKUP ----------
-
-async function signUp(email, password) {
-  if (!firebaseReady || !auth) {
-    toast('Firebase is not configured.');
-    return;
+    console.error('Firebase initialization error:', error);
   }
 
-  try {
-    await auth.createUserWithEmailAndPassword(email, password);
-    toast('Account created successfully!');
-  } catch (error) {
-    console.error('Sign-up error:', error);
-    toast('Sign-up failed: ' + error.message);
+  // ---------------- DEFAULT DATA ----------------
+
+  const fresh = () => ({
+    stars: 0,
+    focus: 0,
+    tasks: [],
+    notes: [{
+      id: 'first',
+      title: 'My first notebook',
+      subject: 'Mathematics',
+      topic: 'Getting started',
+      text: 'Welcome to FocusMate! Write your ideas here.',
+      drawing: ''
+    }],
+    active: 'first',
+    cards: [],
+    sessions: [],
+    badges: [],
+    unlocked: ['lavender'],
+    theme: 'lavender',
+    plan: []
+  });
+
+  function loadLocalData() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+      const defaults = fresh();
+
+      return {
+        ...defaults,
+        ...saved,
+        tasks: Array.isArray(saved.tasks) ? saved.tasks : [],
+        notes: Array.isArray(saved.notes) && saved.notes.length
+          ? saved.notes : defaults.notes,
+        cards: Array.isArray(saved.cards) ? saved.cards : [],
+        sessions: Array.isArray(saved.sessions) ? saved.sessions : [],
+        badges: Array.isArray(saved.badges) ? saved.badges : [],
+        unlocked: Array.isArray(saved.unlocked)
+          ? saved.unlocked : ['lavender'],
+        plan: Array.isArray(saved.plan) ? saved.plan : []
+      };
+    } catch (error) {
+      console.error('Local data error:', error);
+      return fresh();
+    }
   }
-}
 
-async function logIn(email, password) {
-  if (!firebaseReady || !auth) {
-    toast('Firebase is not configured.');
-    return;
+  let d = loadLocalData();
+
+  let noteId = d.active || d.notes[0].id;
+  let seconds = 1500;
+  let total = 1500;
+  let interval = null;
+  let running = false;
+  let eraser = false;
+  let last = null;
+  let drawing = false;
+  let alarmObjectUrl = null;
+  let installPrompt = null;
+  let quizCard = null;
+
+  // ---------------- THEMES AND BADGES ----------------
+
+  const themes = [
+    ['lavender', 'Lavender cloud', 0,
+      'linear-gradient(90deg,#f7f3ff,#8b6ce8)'],
+    ['mint', 'Mint garden', 20,
+      'linear-gradient(90deg,#effaf5,#3d9d85)'],
+    ['peach', 'Peach daydream', 35,
+      'linear-gradient(90deg,#fff4ee,#dc8b75)'],
+    ['night', 'Midnight study', 50,
+      'linear-gradient(90deg,#201d32,#a58af7)']
+  ];
+
+  const badges = [
+    ['first', '🌱', 'First little step',
+      'Finish a focus session', () => d.sessions.length >= 1],
+    ['three', '🌟', 'Finding a rhythm',
+      'Finish 3 sessions', () => d.sessions.length >= 3],
+    ['tasks', '✅', 'Task tamer',
+      'Complete 5 tasks', () => d.tasks.filter(t => t.done).length >= 5],
+    ['notes', '📓', 'Thought collector',
+      'Save 3 notebooks', () => d.notes.length >= 3],
+    ['cards', '🧠', 'Curious mind',
+      'Create 5 flashcards', () => d.cards.length >= 5],
+    ['stars', '✨', 'Star collector',
+      'Earn 50 stars', () => d.stars >= 50]
+  ];
+
+  // ---------------- UTILITIES ----------------
+
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    })[char]);
   }
 
-  try {
-    await auth.signInWithEmailAndPassword(email, password);
-    toast('Logged in successfully!');
-  } catch (error) {
-    console.error('Login error:', error);
-    toast('Login failed: ' + error.message);
-  }
-}
+  function toast(message) {
+    const element = $('toast');
+    if (!element) {
+      console.log(message);
+      return;
+    }
 
-async function logOut() {
-  if (!auth) return;
+    element.textContent = message;
+    element.classList.add('show');
 
-  try {
-    await auth.signOut();
-    toast('Logged out successfully.');
-  } catch (error) {
-    console.error('Logout error:', error);
-    toast('Logout failed.');
-  }
-}
-
-async function saveToCloud() {
-  const user = auth?.currentUser;
-
-  if (!user || !db) {
-    toast('Please log in first.');
-    return;
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => {
+      element.classList.remove('show');
+    }, 2600);
   }
 
-  try {
-    await db.collection('users').doc(user.uid).set({
-      data: d,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-
-    toast('Cloud backup saved!');
-  } catch (error) {
-    console.error('Cloud backup error:', error);
-    toast('Cloud save failed. Check Firestore rules.');
+  function setText(id, value) {
+    const element = $(id);
+    if (element) element.textContent = value;
   }
-}
 
-// Keep the account status updated.
-if (auth) {
-  auth.onAuthStateChanged(user => {
-    const status = $('cloudStatus');
+  function setHTML(id, value) {
+    const element = $(id);
+    if (element) element.innerHTML = value;
+  }
 
-    if (status) {
-      status.textContent = user
-        ? 'Signed in: ' + user.email
-        : 'Not signed in';
+  function bind(id, event, handler) {
+    const element = $(id);
+    if (element) element.addEventListener(event, handler);
+  }
+
+  // ---------------- LOCAL AND CLOUD STORAGE ----------------
+
+  function save() {
+    d.active = noteId;
+
+    try {
+      localStorage.setItem(KEY, JSON.stringify(d));
+    } catch (error) {
+      console.error('Local save error:', error);
+      toast('Could not save locally. Storage may be full.');
+    }
+
+    render();
+
+    if (currentUser && !loadingCloud) {
+      scheduleCloudSave();
+    }
+  }
+
+  function scheduleCloudSave() {
+    clearTimeout(cloudSaveTimer);
+
+    cloudSaveTimer = setTimeout(() => {
+      saveToCloud(true);
+    }, 1200);
+  }
+
+  async function saveToCloud(silent = false) {
+    if (!firebaseReady || !db || !currentUser) {
+      if (!silent) toast('Please log in before saving to the cloud.');
+      return;
+    }
+
+    try {
+      await db.collection('users')
+        .doc(currentUser.uid)
+        .set({
+          data: JSON.parse(JSON.stringify(d)),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+      if (!silent) toast('Cloud backup saved successfully ☁️');
+
+      setText('cloudStatus', 'Signed in: ' + currentUser.email);
+    } catch (error) {
+      console.error('Cloud save error:', error);
+
+      if (!silent) {
+        toast('Cloud save failed. Check your internet and Firestore rules.');
+      }
+
+      setText('cloudStatus', 'Cloud save failed');
+    }
+  }
+
+  async function loadFromCloud(user) {
+    if (!db || !user) return;
+
+    loadingCloud = true;
+
+    try {
+      const ref = db.collection('users').doc(user.uid);
+      const snapshot = await ref.get();
+
+      if (snapshot.exists && snapshot.data().data) {
+        const cloudData = snapshot.data().data;
+
+        d = {
+          ...fresh(),
+          ...cloudData,
+          tasks: Array.isArray(cloudData.tasks) ? cloudData.tasks : [],
+          notes: Array.isArray(cloudData.notes) && cloudData.notes.length
+            ? cloudData.notes : fresh().notes,
+          cards: Array.isArray(cloudData.cards) ? cloudData.cards : [],
+          sessions: Array.isArray(cloudData.sessions)
+            ? cloudData.sessions : [],
+          badges: Array.isArray(cloudData.badges) ? cloudData.badges : [],
+          unlocked: Array.isArray(cloudData.unlocked)
+            ? cloudData.unlocked : ['lavender'],
+          plan: Array.isArray(cloudData.plan) ? cloudData.plan : []
+        };
+
+        noteId = d.active || d.notes[0].id;
+
+        localStorage.setItem(KEY, JSON.stringify(d));
+        render();
+        toast('Your cloud data has been loaded ☁️');
+      } else {
+        await ref.set({
+          data: JSON.parse(JSON.stringify(d)),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        toast('Your existing data was backed up ☁️');
+      }
+    } catch (error) {
+      console.error('Cloud load error:', error);
+      toast('Could not load cloud data. Your local data is preserved.');
+    } finally {
+      loadingCloud = false;
+    }
+  }
+
+  // ---------------- AUTHENTICATION SCREEN ----------------
+
+  function authMessage(message, isError = true) {
+    const element = $('authMessage');
+
+    if (element) {
+      element.textContent = message;
+      element.style.color = isError ? '#c0392b' : '#27834a';
+    }
+  }
+
+  function switchAuthTab(mode) {
+    const signup = mode === 'signup';
+
+    const loginForm = $('loginForm');
+    const signupForm = $('signupForm');
+    const showLoginBtn = $('showLogin');
+    const showSignupBtn = $('showSignup');
+
+    if (loginForm) loginForm.hidden = signup;
+    if (signupForm) signupForm.hidden = !signup;
+
+    if (showLoginBtn) showLoginBtn.classList.toggle('active', !signup);
+    if (showSignupBtn) showSignupBtn.classList.toggle('active', signup);
+
+    authMessage('');
+  }
+
+  bind('showLogin', 'click', () => switchAuthTab('login'));
+  bind('showSignup', 'click', () => switchAuthTab('signup'));
+
+  function showLoginScreen() {
+    if ($('authScreen')) $('authScreen').hidden = false;
+    if ($('appHeader')) $('appHeader').hidden = true;
+    if ($('appDashboard')) $('appDashboard').hidden = true;
+
+    setText('cloudStatus', 'Not signed in');
+
+    const logout = $('logoutBtn');
+    if (logout) logout.remove();
+  }
+
+  function showDashboard(user) {
+    if ($('authScreen')) $('authScreen').hidden = true;
+    if ($('appHeader')) $('appHeader').hidden = false;
+    if ($('appDashboard')) $('appDashboard').hidden = false;
+
+    setText('cloudStatus', 'Signed in: ' + (user.email || 'Account'));
+
+    let logout = $('logoutBtn');
+
+    if (!logout) {
+      const headerControls = document.querySelector('#appHeader > div');
+
+      if (headerControls) {
+        logout = document.createElement('button');
+        logout.id = 'logoutBtn';
+        logout.type = 'button';
+        logout.textContent = 'Log Out';
+        headerControls.appendChild(logout);
+      }
+    }
+
+    if (logout) {
+      logout.onclick = async () => {
+        try {
+          await saveToCloud(true);
+          await auth.signOut();
+          authMessage('You have logged out successfully.', false);
+        } catch (error) {
+          console.error('Logout error:', error);
+          toast('Could not log out. Please try again.');
+        }
+      };
+    }
+  }
+
+  bind('loginForm', 'submit', async event => {
+    event.preventDefault();
+
+    if (!firebaseReady || !auth) {
+      authMessage('Firebase is not ready. Check your configuration.');
+      return;
+    }
+
+    const email = $('loginEmail')?.value.trim();
+    const password = $('loginPassword')?.value;
+    const button = $('loginForm')?.querySelector('[type="submit"]');
+
+    if (!email || !password) {
+      authMessage('Enter your email and password.');
+      return;
+    }
+
+    if (button) button.disabled = true;
+    authMessage('Signing you in...', false);
+
+    try {
+      await auth.signInWithEmailAndPassword(email, password);
+      authMessage('Login successful!', false);
+    } catch (error) {
+      console.error('Login error:', error);
+
+      const messages = {
+        'auth/invalid-email': 'Enter a valid email address.',
+        'auth/user-not-found': 'No account found. Please sign up first.',
+        'auth/wrong-password': 'Incorrect email or password.',
+        'auth/invalid-credential': 'Incorrect email or password.',
+        'auth/too-many-requests': 'Too many attempts. Try again later.',
+        'auth/network-request-failed': 'Network error. Check your internet.'
+      };
+
+      authMessage(messages[error.code] || 'Login failed. Please try again.');
+    } finally {
+      if (button) button.disabled = false;
     }
   });
-}g a rhythm','Finish 3 sessions',()=>d.sessions.length>=3],['tasks','✅','Task tamer','Complete 5 tasks',()=>d.tasks.filter(t=>t.done).length>=5],['notes','📓','Thought collector','Save 3 notebooks',()=>d.notes.length>=3],['cards','🧠','Curious mind','Create 5 flashcards',()=>d.cards.length>=5],['stars','✨','Star collector','Earn 50 stars',()=>d.stars>=50]];function toast(s){$('toast').textContent=s;$('toast').classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>$('toast').classList.remove('show'),2400)}function save(){d.active=noteId;localStorage.setItem(KEY,JSON.stringify(d));render()}function render(){ $('focusStat').textContent=d.focus+' min';$('taskStat').textContent=d.tasks.filter(t=>t.done).length;$('starsStat').textContent=d.stars;$('badgeStat').textContent=d.badges.length;renderTasks();renderNotes();renderCards();renderRewards();renderSessions();renderHome();document.body.dataset.theme=d.theme==='lavender'?'':d.theme}function view(v){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id===v));window.scrollTo({top:0,behavior:'smooth'});if(v==='notebook')setTimeout(resizeCanvas,50)}document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>view(b.dataset.view));function renderTasks(){const html=d.tasks.map(t=>`<div class="item ${t.done?'done':''}"><input type="checkbox" data-check="${t.id}" ${t.done?'checked':''}><span>${esc(t.title)}<small>${esc(t.subject||'General')}${t.date?' · '+esc(t.date):''}</small></span><button data-del-task="${t.id}">×</button></div>`).join('')||'<p class="hint">No tasks yet. Add a small step.</p>';$('tasks').innerHTML=html}function renderHome(){$('homeTasks').innerHTML=d.tasks.filter(t=>!t.done).slice(0,4).map(t=>`<div class="item"><span>${esc(t.title)}<small>${esc(t.subject||'General')}</small></span><button data-check-home="${t.id}">Done</button></div>`).join('')||'<p class="hint">Your next little win will appear here.</p>'}function renderNotes(){$('notebookList').innerHTML=d.notes.map(n=>`<div class="item"><button data-open-note="${n.id}">📓</button><span>${esc(n.title||'Untitled')}<small>${esc(n.subject||'Other')}</small></span></div>`).join('');let n=d.notes.find(x=>x.id===noteId);if(n){$('noteTitle').value=n.title||'';$('noteSubject').value=n.subject||'Other';$('noteTopic').value=n.topic||'';$('noteText').value=n.text||'';draw(n.drawing||'')}}function renderCards(){$('cards').innerHTML=d.cards.map(c=>`<div class="item"><span><b>${esc(c.deck)}</b><small>${esc(c.front)}</small></span><button data-delete-card="${c.id}">×</button></div>`).join('')||'<p class="hint">No flashcards yet.</p>'}function renderRewards(){$('badges').innerHTML=badges.map(b=>`<div class="item ${d.badges.includes(b[0])?'':'locked'}"><span>${b[1]} <b>${b[2]}</b><small>${b[3]}</small></span>${d.badges.includes(b[0])?'✓':''}</div>`).join('');$('themes').innerHTML=themes.map(t=>`<div class="item" data-theme="${t[0]}"><span><b>${t[1]}</b><small>${d.unlocked.includes(t[0])?(d.theme===t[0]?'Selected':'Tap to use'):'Unlock for '+t[2]+' ⭐'}</small></span><i style="display:block;width:25px;height:25px;border-radius:8px;background:${t[3]}"></i></div>`).join('')}function renderSessions(){$('sessions').innerHTML=d.sessions.slice(0,5).map(s=>`<div class="item"><span>${esc(s.label)}<small>${new Date(s.at).toLocaleString()}</small></span><b>${s.minutes} min</b></div>`).join('')||'<p class="hint">Completed sessions appear here.</p>'}function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function award(){let newBadges=[];badges.forEach(b=>{if(b[4]()&&!d.badges.includes(b[0])){d.badges.push(b[0]);newBadges.push(b[2])}});if(newBadges.length)toast('Badge earned: '+newBadges.join(', ')+' 🏅')}function addTask(){let title=$('taskName').value.trim();if(!title)return toast('Add a task name first.');d.tasks.push({id:id(),title,subject:$('taskSubject').value,date:$('taskDate').value,done:false});$('taskName').value='';save();toast('Task added 🌱')}$('addTask').onclick=addTask;document.addEventListener('click',e=>{let t=e.target.closest('[data-check],[data-check-home]');if(t){let tid=t.dataset.check||t.dataset.checkHome,task=d.tasks.find(x=>x.id===tid);if(task&&!task.done){task.done=true;d.stars+=2;award();toast('Task complete! +2 stars ⭐')}save()}let del=e.target.closest('[data-del-task]');if(del){d.tasks=d.tasks.filter(x=>x.id!==del.dataset.delTask);save()}let op=e.target.closest('[data-open-note]');if(op){saveNote(true);noteId=op.dataset.openNote;renderNotes()}let dc=e.target.closest('[data-delete-card]');if(dc){d.cards=d.cards.filter(x=>x.id!==dc.dataset.deleteCard);save()}let th=e.target.closest('[data-theme]');if(th){let theme=themes.find(x=>x[0]===th.dataset.theme);if(!d.unlocked.includes(theme[0])){if(d.stars<theme[2])return toast('You need more stars to unlock this theme.');if(!confirm(`Unlock ${theme[1]} for ${theme[2]} stars?`))return;d.stars-=theme[2];d.unlocked.push(theme[0])}d.theme=theme[0];save();toast('Theme changed!')}});function setTimer(s){clearInterval(interval);interval=null;running=false;seconds=total=s;$('startTimer').textContent='Start';showTimer()}function showTimer(){$('timer').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0')}document.querySelectorAll('[data-min]').forEach(b=>b.onclick=()=>setTimer(Number(b.dataset.min)*60));$('resetTimer').onclick=()=>setTimer(total);$('startTimer').onclick=()=>{if(running){clearInterval(interval);running=false;$('startTimer').textContent='Resume';return}running=true;$('startTimer').textContent='Pause';interval=setInterval(async()=>{seconds--;showTimer();if(seconds<=0){clearInterval(interval);running=false;let mins=Math.max(1,Math.round(total/60));d.focus+=mins;d.stars+=Math.max(1,Math.floor(mins/10));d.sessions.unshift({label:$('intention').value.trim()||'Focus session',minutes:mins,at:Date.now()});award();save();$('startTimer').textContent='Start';toast('Session complete! You earned stars ⭐');if($('sound').checked)playAlarm();if($('notify').checked&&'Notification'in window){if(Notification.permission==='granted')new Notification('FocusMate',{body:'Well done! Take a break if you need one.'});else if(await Notification.requestPermission()==='granted')new Notification('FocusMate',{body:'Your focus session is complete.'})}}},1000)};$('customTimer').onclick=()=>{let n=Number($('customMinutes').value);if(n<1||n>180)return toast('Choose 1–180 minutes.');setTimer(n*60)};function chime(mode='chime'){try{let C=window.AudioContext||window.webkitAudioContext,c=new C(),tones=mode==='bell'?[523,659,784,1046,784,1046]:[660,880,990];tones.forEach((f,i)=>{let o=c.createOscillator(),g=c.createGain();o.type=mode==='bell'?'triangle':'sine';o.frequency.value=f;let at=c.currentTime+i*(mode==='bell'?.22:.15);g.gain.setValueAtTime(.001,at);g.gain.exponentialRampToValueAtTime(.12,at+.03);g.gain.exponentialRampToValueAtTime(.001,at+.32);o.connect(g);g.connect(c.destination);o.start(at);o.stop(at+.34)});setTimeout(()=>c.close(),1800)}catch{}}function playAlarm(){let mode=$('alarmMode')?.value||'chime';if(mode==='music'&&alarmObjectUrl){let a=$('alarmAudio');a.src=alarmObjectUrl;a.currentTime=0;a.loop=true;a.play().catch(()=>toast('Tap Test alarm first, or choose a different alarm sound.'));return}chime(mode==='bell'?'bell':'chime')}function stopAlarm(){let a=$('alarmAudio');a.pause();a.currentTime=0}function saveNote(silent=false){let n=d.notes.find(x=>x.id===noteId);if(!n)return;n.title=$('noteTitle').value.trim()||'Untitled';n.subject=$('noteSubject').value;n.topic=$('noteTopic').value;n.text=$('noteText').value;n.drawing=$('canvas').toDataURL();if(!silent)toast('Notebook saved');save()}$('saveNote').onclick=()=>saveNote();$('newNote').onclick=()=>{saveNote(true);let n={id:id(),title:'New notebook',subject:'Mathematics',topic:'',text:'',drawing:''};d.notes.push(n);noteId=n.id;save();view('notebook')};$('deleteNote').onclick=()=>{if(d.notes.length<2)return toast('Keep at least one notebook.');if(confirm('Delete this notebook?')){d.notes=d.notes.filter(n=>n.id!==noteId);noteId=d.notes[0].id;save();renderNotes()}};const canvas=$('canvas'),ctx=canvas.getContext('2d');function resizeCanvas(){let old=canvas.toDataURL(),r=canvas.getBoundingClientRect(),ratio=window.devicePixelRatio||1;canvas.width=Math.max(1,r.width*ratio);canvas.height=220*ratio;ctx.setTransform(ratio,0,0,ratio,0,0);ctx.lineCap='round';ctx.lineJoin='round';if(old&&old!=='data:,'){let im=new Image();im.onload=()=>ctx.drawImage(im,0,0,r.width,220);im.src=old}}function draw(url){ctx.clearRect(0,0,canvas.width,canvas.height);if(url){let im=new Image();im.onload=()=>ctx.drawImage(im,0,0,canvas.width/(window.devicePixelRatio||1),canvas.height/(window.devicePixelRatio||1));im.src=url}}function pos(e){let r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}canvas.onpointerdown=e=>{drawing=true;last=pos(e);canvas.setPointerCapture(e.pointerId)};canvas.onpointermove=e=>{if(!drawing)return;let p=pos(e);ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.lineWidth=Number($('penSize').value);ctx.strokeStyle=eraser?'#ffffff':$('penColor').value;ctx.stroke();last=p};['pointerup','pointercancel','pointerleave'].forEach(ev=>canvas.addEventListener(ev,()=>{if(drawing){drawing=false;saveNote(true)}}));$('eraser').onclick=()=>{eraser=!eraser;$('eraser').textContent=eraser?'Pen mode':'Eraser'};$('clearDraw').onclick=()=>{if(confirm('Clear drawing?')){ctx.clearRect(0,0,canvas.width,canvas.height);saveNote(true)}};window.addEventListener('resize',()=>{if($('notebook').classList.contains('active')){resizeCanvas();let n=d.notes.find(x=>x.id===noteId);if(n)draw(n.drawing)}});$('addCard').onclick=()=>{let front=$('front').value.trim(),back=$('back').value.trim();if(!front||!back)return toast('Add both a question and answer.');d.cards.push({id:id(),front,back,deck:$('deckName').value.trim()||'My deck'});$('front').value='';$('back').value='';award();save();toast('Flashcard saved 🃏')};let quizCard=null;$('startQuiz').onclick=()=>{if(!d.cards.length){$('quiz').textContent='Add a flashcard to begin.';return}quizCard=d.cards[Math.floor(Math.random()*d.cards.length)];$('quiz').innerHTML=`<b>${esc(quizCard.front)}</b><p id="answer" hidden>${esc(quizCard.back)}</p><button id="reveal">Reveal answer</button><button id="knew" hidden>I knew it ✓</button><button id="again" hidden>Practise again</button>`;$('reveal').onclick=()=>{$('answer').hidden=false;$('knew').hidden=false;$('again').hidden=false};$('knew').onclick=()=>{d.stars++;save();$('feedback').textContent='Great recall! +1 star';$('startQuiz').click()};$('again').onclick=()=>{$('feedback').textContent='No worries — practise makes progress.';$('startQuiz').click()}};$('buildPlan').onclick=()=>{let a=$('from').value,b=$('until').value,block=Number($('block').value);if(!a||!b||b<=a)return toast('Choose an end time after start time.');let start=+a.slice(0,2)*60+ +a.slice(3),end=+b.slice(0,2)*60+ +b.slice(3),tasks=d.tasks.filter(t=>!t.done);if(!tasks.length)tasks=[{title:'Review notes',subject:'Study'}];let out=[];while(start+block<=end&&out.length<12){let t=tasks[out.length%tasks.length],fin=start+block;out.push(`${fmt(start)}–${fmt(fin)} · ${t.title}`);start=fin+5}if(!out.length)return toast('Not enough time for one full block.');$('timetable').innerHTML=out.map(x=>`<div class="item"><span>${esc(x)}</span></div>`).join('')};function fmt(n){return String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0')}$('themeBtn').onclick=()=>view('rewards');$('alarmFile').onchange=e=>{let f=e.target.files[0];if(!f)return;if(alarmObjectUrl)URL.revokeObjectURL(alarmObjectUrl);alarmObjectUrl=URL.createObjectURL(f);$('alarmMode').value='music';toast('Alarm music ready for this session.')};$('testAlarm').onclick=()=>playAlarm();$('stopAlarm').onclick=()=>stopAlarm();function embedMusic(raw){let u;try{u=new URL(raw)}catch{return null}if(u.hostname==='youtu.be'){let vid=u.pathname.slice(1).split('/')[0];return vid?{src:'https://www.youtube-nocookie.com/embed/'+encodeURIComponent(vid),type:'youtube'}:null}if(u.hostname.endsWith('youtube.com')){let vid=u.searchParams.get('v');if(!vid&&u.pathname.startsWith('/embed/'))vid=u.pathname.split('/')[2];if(!vid&&u.pathname.startsWith('/shorts/'))vid=u.pathname.split('/')[2];return vid?{src:'https://www.youtube-nocookie.com/embed/'+encodeURIComponent(vid),type:'youtube'}:null}if(u.hostname==='open.spotify.com'){let path=u.pathname.split('/').filter(Boolean);if(path.length>=2&&['track','album','playlist','episode','show'].includes(path[0]))return{src:'https://open.spotify.com/embed/'+path.slice(0,2).map(encodeURIComponent).join('/'),type:'spotify'};}return null}$('playLink').onclick=()=>{let result=embedMusic($('musicUrl').value.trim());if(!result){toast('Use a YouTube video link or a Spotify track, album or playlist link.');return}$('musicPlayer').innerHTML=`<iframe class="${result.type==='spotify'?'spotify':''}" src="${result.src}" title="Music player" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe>`};$('clearPlayer').onclick=()=>{$('musicPlayer').innerHTML='<p class="hint">Paste a supported link to try embedded playback here.</p>'};document.querySelectorAll('[data-min][data-view="focus"]').forEach(b=>b.onclick=()=>{setTimer(Number(b.dataset.min)*60);view('focus')});$('export').onclick=()=>{let a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(d,null,2)],{type:'application/json'}));a.href=url;a.download='focusmate-backup.json';a.click();URL.revokeObjectURL(url)};$('import').onchange=e=>{let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{let x=JSON.parse(r.result);if(!Array.isArray(x.tasks)||!Array.isArray(x.notes))throw Error();if(confirm('Replace local data with this backup?')){d={...fresh(),...x};noteId=d.active||d.notes[0].id;save();toast('Backup imported')}}catch{toast('Invalid FocusMate backup file.')}};r.readAsText(f)};$('accountBtn').onclick = async () => {
-  if (!firebaseReady || !auth || !db) {
-    toast('Check Firebase configuration.');
-    return;
-  }
 
-  if (auth.currentUser) {
-    const choice = prompt(
-      'FocusMate Account\n\n' +
-      '1. Save cloud backup\n' +
-      '2. Log out\n\n' +
-      'Enter 1 or 2:'
-    );
+  bind('signupForm', 'submit', async event => {
+    event.preventDefault();
 
-    if (choice === '1') await saveToCloud();
-    if (choice === '2') await logOut();
-    return;
-  }
+    if (!firebaseReady || !auth) {
+      authMessage('Firebase is not ready. Check your configuration.');
+      return;
+    }
 
-  const choice = prompt(
-    'FocusMate Account\n\n' +
-    '1. Create account\n' +
-    '2. Log in\n\n' +
-    'Enter 1 or 2:'
-  );
+    const email = $('signupEmail')?.value.trim();
+    const password = $('signupPassword')?.value;
+    const confirmation = $('confirmPassword')?.value;
+    const button = $('signupForm')?.querySelector('[type="submit"]');
 
-  if (choice !== '1' && choice !== '2') return;
+    if (!email || !password) {
+      authMessage('Enter your email and password.');
+      return;
+    }
 
-  const email = prompt('Enter your email address:');
-  if (!email || !email.trim()) return;
+    if (password.length < 6) {
+      authMessage('Your password must be at least 6 characters.');
+      return;
+    }
 
-  const password = prompt('Enter your password:');
-  if (!password) return;
+    if (password !== confirmation) {
+      authMessage('Your passwords do not match.');
+      return;
+    }
 
-  if (choice === '1') {
-    await signUp(email.trim(), password);
+    if (button) button.disabled = true;
+    authMessage('Creating your account...', false);
+
+    try {
+      await auth.createUserWithEmailAndPassword(email, password);
+      authMessage('Account created successfully!', false);
+    } catch (error) {
+      console.error('Sign-up error:', error);
+
+      const messages = {
+        'auth/email-already-in-use': 'This email already has an account. Log in instead.',
+        'auth/invalid-email': 'Enter a valid email address.',
+        'auth/weak-password': 'Choose a stronger password.',
+        'auth/network-request-failed': 'Network error. Check your internet.'
+      };
+
+      authMessage(messages[error.code] || 'Could not create your account.');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+
+  if (auth) {
+    auth.onAuthStateChanged(async user => {
+      currentUser = user || null;
+
+      if (user) {
+        showDashboard(user);
+        await loadFromCloud(user);
+        render();
+      } else {
+        showLoginScreen();
+      }
+    });
   } else {
-    await logIn(email.trim(), password);
+    showLoginScreen();
+    authMessage('Firebase failed to initialize. Check firebase-config.js.');
   }
-};window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('installBtn').hidden=false});$('installBtn').onclick=async()=>{if(installPrompt){installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;$('installBtn').hidden=true}};if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});$('taskDate').value=today();$('studyDate').value=today();$('greeting').textContent=new Date().getHours()<12?'Good morning, study friend ☀️':'Ready for a little progress?';render();setTimer(1500);})();
+
+  // ---------------- RENDERING ----------------
+
+  function render() {
+    setText('focusStat', d.focus + ' min');
+    setText('taskStat', d.tasks.filter(t => t.done).length);
+    setText('starsStat', d.stars);
+    setText('badgeStat', d.badges.length);
+
+    renderTasks();
+    renderHome();
+    renderNotes();
+    renderCards();
+    renderRewards();
+    renderSessions();
+
+    document.body.dataset.theme =
+      d.theme === 'lavender' ? '' : d.theme;
+  }
+
+  function renderTasks() {
+    setHTML('tasks', d.tasks.map(task => `
+      <div class="item ${task.done ? 'done' : ''}">
+        <input type="checkbox"
+          data-check="${esc(task.id)}"
+          ${task.done ? 'checked' : ''}>
+        <span>
+          ${esc(task.title)}
+          <small>${esc(task.subject || 'General')}${
+            task.date ? ' · ' + esc(task.date) : ''
+          }</small>
+        </span>
+        <button data-del-task="${esc(task.id)}">×</button>
+      </div>
+    `).join('') || '<p class="hint">No tasks yet. Add a small step.</p>');
+  }
+
+  function renderHome() {
+    setHTML('homeTasks', d.tasks.filter(t => !t.done).slice(0, 4).map(task => `
+      <div class="item">
+        <span>${esc(task.title)}
+          <small>${esc(task.subject || 'General')}</small>
+        </span>
+        <button data-check-home="${esc(task.id)}">Done</button>
+      </div>
+    `).join('') || '<p class="hint">Your next little win will appear here.</p>');
+  }
+
+  function renderNotes() {
+    setHTML('notebookList', d.notes.map(note => `
+      <div class="item">
+        <button data-open-note="${esc(note.id)}">📓</button>
+        <span>${esc(note.title || 'Untitled')}
+          <small>${esc(note.subject || 'Other')}</small>
+        </span>
+      </div>
+    `).join(''));
+
+    const note = d.notes.find(n => n.id === noteId);
+
+    if (note) {
+      if ($('noteTitle'))$('noteTitle').value = note.title || '';
+      if ($('noteSubject'))$('noteSubject').value = note.subject || 'Other';
+      if ($('noteTopic'))$('noteTopic').value = note.topic || '';
+      if ($('noteText'))$('noteText').value = note.text || '';
+
+      if (typeof draw === 'function') draw(note.drawing || '');
+    }
+  }
+
+  function renderCards() {
+    setHTML('cards', d.cards.map(card => `
+      <div class="item">
+        <span><b>${esc(card.deck)}</b>
+          <small>${esc(card.front)}</small>
+        </span>
+        <button data-delete-card="${esc(card.id)}">×</button>
+      </div>
+    `).join('') || '<p class="hint">No flashcards yet.</p>');
+  }
+
+  function renderRewards() {
+    setHTML('badges', badges.map(badge => `
+      <div class="item ${d.badges.includes(badge[0]) ? '' : 'locked'}">
+        <span>${badge[1]} <b>${esc(badge[2])}</b>
+          <small>${esc(badge[3])}</small>
+        </span>
+        ${d.badges.includes(badge[0]) ? '✓' : ''}
+      </div>
+    `).join(''));
+
+    setHTML('themes', themes.map(theme => `
+      <div class="item" data-theme="${theme[0]}">
+        <span><b>${esc(theme[1])}</b>
+          <small>${d.unlocked.includes(theme[0])
+            ? (d.theme === theme[0] ? 'Selected' : 'Tap to use')
+            : 'Unlock for ' + theme[2] + ' ⭐'}</small>
+        </span>
+        <i style="display:block;width:25px;height:25px;
+          border-radius:8px;background:${theme[3]}"></i>
+      </div>
+    `).join(''));
+  }
+
+  function renderSessions() {
+    setHTML('sessions', d.sessions.slice(0, 5).map(session => `
+      <div class="item">
+        <span>${esc(session.label)}
+          <small>${new Date(session.at).toLocaleString()}</small>
+        </span>
+        <b>${session.minutes} min</b>
+      </div>
+    `).join('') || '<p class="hint">Completed sessions appear here.</p>');
+  }
+
+  function award() {
+    const earned = [];
+
+    badges.forEach(badge => {
+      if (badge[4]() && !d.badges.includes(badge[0])) {
+        d.badges.push(badge[0]);
+        earned.push(badge[2]);
+      }
+    });
+
+    if (earned.length) {
+      toast('Badge earned: ' + earned.join(', ') + ' 🏅');
+    }
+  }
+
+  // ---------------- NAVIGATION ----------------
+
+  function view(id) {
+    document.querySelectorAll('.view').forEach(element => {
+      element.classList.toggle('active', element.id === id);
+    });
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (id === 'notebook') {
+      setTimeout(resizeCanvas, 50);
+    }
+  }
+
+  document.querySelectorAll('[data-view]').forEach(button => {
+    button.addEventListener('click', () => view(button.dataset.view));
+  });
+
+  bind('themeBtn', 'click', () => view('rewards'));
+
+  // ---------------- TASKS ----------------
+
+  function addTask() {
+    const title = $('taskName')?.value.trim();
+    if (!title) return toast('Add a task name first.');
+
+    d.tasks.push({
+      id: makeId(),
+      title,
+      subject: $('taskSubject')?.value || 'General',
+      date: $('taskDate')?.value || '',
+      done: false
+    });
+
+    if ($('taskName'))$('taskName').value = '';
+
+    save();
+    toast('Task added 🌱');
+  }
+
+  bind('addTask', 'click', addTask);
+
+  document.addEventListener('click', event => {
+    const check = event.target.closest('[data-check], [data-check-home]');
+
+    if (check) {
+      const taskId = check.dataset.check || check.dataset.checkHome;
+      const task = d.tasks.find(t => t.id === taskId);
+
+      if (task && !task.done) {
+        task.done = true;
+        d.stars += 2;
+        award();
+        toast('Task complete! +2 stars ⭐');
+      }
+
+      save();
+    }
+
+    const removeTask = event.target.closest('[data-del-task]');
+
+    if (removeTask) {
+      d.tasks = d.tasks.filter(t => t.id !== removeTask.dataset.delTask);
+      save();
+    }
+
+    const openNote = event.target.closest('[data-open-note]');
+
+    if (openNote) {
+      saveNote(true);
+      noteId = openNote.dataset.openNote;
+      renderNotes();
+    }
+
+    const removeCard = event.target.closest('[data-delete-card]');
+
+    if (removeCard) {
+      d.cards = d.cards.filter(c => c.id !== removeCard.dataset.deleteCard);
+      save();
+    }
+
+    const themeButton = event.target.closest('[data-theme]');
+
+    if (themeButton) {
+      const theme = themes.find(t => t[0] === themeButton.dataset.theme);
+      if (!theme) return;
+
+      if (!d.unlocked.includes(theme[0])) {
+        if (d.stars < theme[2]) {
+          return toast('You need more stars to unlock this theme.');
+        }
+
+        if (!confirm(`Unlock ${theme[1]} for ${theme[2]} stars?`)) return;
+
+        d.stars -= theme[2];
+        d.unlocked.push(theme[0]);
+      }
+
+      d.theme = theme[0];
+      save();
+      toast('Theme changed!');
+    }
+  });
+
+  // ---------------- FOCUS TIMER ----------------
+
+  function showTimer() {
+    setText(
+      'timer',
+      String(Math.floor(seconds / 60)).padStart(2, '0') + ':' +
+      String(seconds % 60).padStart(2, '0')
+    );
+  }
+
+  function setTimer(value) {
+    clearInterval(interval);
+    interval = null;
+    running = false;
+    seconds = total = value;
+
+    setText('startTimer', 'Start');
+    showTimer();
+  }
+
+  function completeSession() {
+    const minutes = Math.max(1, Math.round(total / 60));
+
