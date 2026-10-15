@@ -25,18 +25,23 @@
   // ---------------- FIREBASE INITIALIZATION ----------------
 
   try {
-    if (typeof firebase !== 'undefined') {
-      if (!firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
+    if (typeof firebase !== 'undefined' && firebase.initializeApp) {
+      const config = window.firebaseConfig || (typeof firebaseConfig !== 'undefined' ? firebaseConfig : null);
+      if (config && !firebase.apps.length) {
+        firebase.initializeApp(config);
       }
-
-      auth = firebase.auth();
-      db = firebase.firestore();
-      firebaseReady = true;
+      if (firebase.apps.length) {
+        auth = firebase.auth();
+        db = firebase.firestore();
+        firebaseReady = true;
+      }
+    } else {
+      console.warn('Firebase CDN not loaded. Running in local-only mode.');
     }
   } catch (error) {
     console.error('Firebase initialization error:', error);
   }
+
 
   // ---------------- DEFAULT DATA ----------------
 
@@ -1326,8 +1331,8 @@
   // ---------------- INITIAL SETUP ----------------
 
   document.addEventListener('DOMContentLoaded', () => {
-    if ($('taskDate')) $('taskDate').value = today();
-    if ($('studyDate')) $('studyDate').value = today();
+    if ($('taskDate'))$('taskDate').value = today();
+    if ($('studyDate'))$('studyDate').value = today();
 
     setText(
       'greeting',
